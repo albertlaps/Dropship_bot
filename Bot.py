@@ -1,45 +1,97 @@
 import os
-import telebot
-from telebot import types
+import json
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = os.getenv("8315107200:8315107200:AAErdmzS5uJFhDh4E_CjQkxFgcavkBxgnT0")
+# ✅ Read bot token from environment variable
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable not set")
 
-bot = telebot.TeleBot(TOKEN)
+# ✅ File to store product data
+DATA_FILE = "products.json"
 
-products_data = {
-    "Product A": 120,
-    "Product B": 250,
-    "Product C": 90
-}
+# Load products from file
+def load_products():
+    if not os.path.exists(DATA_FILE):
+        return []
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
-@bot.message_handler(commands=["start"])
-def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📦 Products", "💰 Profit", "ℹ️ Help")
-    bot.send_message(
-        message.chat.id,
-        "Welcome to Dropship Bot 🤖\nChoose an option:",
-        reply_markup=markup
+# Save products to file
+def save_products(products):
+    with open(DATA_FILE, "w") as f:
+        json.dump(products, f, indent=2)
+
+# /start command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 Dropshipping Bot is running!\nUse /addproduct, /listproducts, /profit"
     )
 
-@bot.message_handler(func=lambda message: message.text == "📦 Products")
-def products(message):
-    text = "📦 Products & Profits:\n\n"
-    for product, profit in products_data.items():
-        text += f"{product}: R{profit}\n"
-    bot.send_message(message.chat.id, text)
+# /addproduct command: /addproduct name cost selling_price
+async def addproduct(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if len(args) != 3:
+        await update.message.reply_text("Usage: /addproduct name cost selling_price")
+        return
+    
+    name, cost, selling = args
+    try:
+        cost = float(cost)
+        selling = float(selling)
+    except ValueError:
+        await update.message.reply_text("Cost and selling price must be numbers.")
+        return
 
-@bot.message_handler(func=lambda message: message.text == "💰 Profit")
-def profit(message):
-    total = sum(products_data.values())
-    bot.send_message(message.chat.id, f"💰 Total Profit: R{total}")
+    products = load_products()
+    products.append({
+        "name": name,
+        "cost": cost,
+        "selling_price": selling
+    })
+    save_products(products)
+    await update.message.reply_text(f"✅ Product '{name}' added successfully!")
 
-@bot.message_handler(func=lambda message: message.text == "ℹ️ Help")
-def help_cmd(message):
-    bot.send_message(
-        message.chat.id,
-        "Use the buttons to view products or profits.\nBot runs 24/7 🚀"
+# /listproducts command
+async def listproducts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    products = load_products()
+    if not products:
+        await update.message.reply_text("No products added yet.")
+        return
+    
+    msg = "📦 Products:\n"
+    for p in products:
+        msg += f"- {p['name']}: Cost R{p['cost']}, Selling R{p['selling_price']}\n"
+    await update.message.reply_text(msg)
+
+# /profit command
+async def profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    products = load_products()
+    if not products:
+        await update.message.reply_text("No products added yet.")
+        return
+    
+    total_cost = sum(p["cost"] for p in products)
+    total_selling = sum(p["selling_price"] for p in products)
+    total_profit = total_selling - total_cost
+
+    await update.message.reply_text(
+        f"💰 Total Cost: R{total_cost}\n"
+        f"💵 Total Selling: R{total_selling}\n"
+        f"🤑 Total Profit: R{total_profit}"
     )
 
-print("🤖 Bot is running...")
-bot.infinity_polling()
+# Main function
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("addproduct", addproduct))
+    app.add_handler(CommandHandler("listproducts", listproducts))
+    app.add_handler(CommandHandler("profit", profit))
+    
+    print("Bot started successfully...")
+    app.run_polling()  # Keeps the bot alive
+
+if __name__ == "__main__":
+    main()
